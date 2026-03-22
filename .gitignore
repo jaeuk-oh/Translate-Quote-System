@@ -1,0 +1,84 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# 가상환경
+.venv/
+venv/
+env/
+ENV/
+
+# 테스트 / 커버리지
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Node.js / Next.js
+# =========================
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# =========================
+# 환경 변수 / 시크릿
+# =========================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+
+# =========================
+# 로그 / 임시
+# =========================
+*.log
+*.tmp
+*.bak
+logs/
+
+# =========================
+# DB / 캐시
+# =========================
+dump.rdb
+*.sqlite3
+*.db
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Docker
+# =========================
+.docker/
+
+# =========================
+# Alembic (버전 파일은 추적)
+# =========================
+alembic/versions/__pycache__/

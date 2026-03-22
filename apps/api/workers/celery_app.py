@@ -18,6 +18,7 @@ celery_app = Celery(
     include=[
         "workers.quote_worker",
         "workers.assign_worker",
+        "workers.notify_worker",
     ],
 )
 
