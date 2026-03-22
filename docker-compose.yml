@@ -1,0 +1,106 @@
+version: "3.9"
+
+# ── 번역 플랫폼 Docker Compose ──────────────────────────────
+# 로컬 개발 환경: PostgreSQL + Redis + FastAPI + Celery 워커
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────
+  # pg_trgm 확장으로 TM(Translation Memory) 글자 유사도 매칭 지원
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-translate_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-translate_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-translate_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./apps/api/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-translate_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────────────────
+  # Celery 브로커 + 중복 방지 락(SETNX) + 결과 백엔드
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI 백엔드 ─────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-translate_user}:${POSTGRES_PASSWORD:-translate_pass}@db:5432/${POSTGRES_DB:-translate_db}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── Celery 워커 ────────────────────────────────────────
+  # 견적 계산 및 번역가 배정 비동기 처리
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-translate_user}:${POSTGRES_PASSWORD:-translate_pass}@db:5432/${POSTGRES_DB:-translate_db}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=4
+
+  # ── Celery Beat (스케줄러) ─────────────────────────────
+  # 24시간 타임아웃 체크, 배정 만료 처리 등 주기적 작업
+  beat:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-translate_user}:${POSTGRES_PASSWORD:-translate_pass}@db:5432/${POSTGRES_DB:-translate_db}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
