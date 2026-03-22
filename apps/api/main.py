@@ -1,15 +1,19 @@
 """
 FastAPI 애플리케이션 진입점.
-라우터 등록, CORS 설정, Swagger 자동 문서화 제공.
+라우터 등록, CORS 설정, Rate Limit, 감사 로그, Swagger 자동 문서화 제공.
 """
 
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from core.audit_log import AuditLogMiddleware
 from core.config import settings
-from routers import auth, jobs, quotes, assignments
+from core.rate_limit import RateLimitMiddleware, limiter
+from routers import auth, jobs, quotes, assignments, notifications
 
 
 @asynccontextmanager
@@ -39,8 +43,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS 설정 ─────────────────────────────────────────────────
-# 개발 환경에서는 모든 오리진 허용; 운영 환경에서는 허용 도메인 명시 권장
+# slowapi Rate Limiter를 앱 state에 등록 (라우터 데코레이터 방식 사용 시 필수)
+app.state.limiter = limiter
+
+# Rate Limit 초과 시 429 응답 핸들러 등록
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── 미들웨어 등록 (등록 역순으로 실행됨) ───────────────────────────
+# 1. 감사 로그: 모든 요청/응답을 audit_logs 테이블에 기록
+app.add_middleware(AuditLogMiddleware)
+
+# 2. Rate Limit: 초과 응답(429)을 한글 메시지로 변환
+app.add_middleware(RateLimitMiddleware)
+
+# 3. CORS 설정: 개발 환경에서는 모든 오리진 허용, 운영 환경에서는 허용 도메인 명시 권장
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.DEBUG else ["https://yourdomain.com"],
@@ -54,6 +70,7 @@ app.include_router(auth.router)
 app.include_router(jobs.router)
 app.include_router(quotes.router)
 app.include_router(assignments.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health", tags=["헬스체크"])
