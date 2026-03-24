@@ -20,11 +20,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # ── AWS S3 ────────────────────────────────────────
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
-    AWS_S3_BUCKET: str = ""
-    AWS_REGION: str = "ap-northeast-2"
+    # ── Supabase (DB + Storage 통합) ─────────────────
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""  # service_role 키 (Storage 업로드 권한)
 
     # ── 이메일 (Resend) ───────────────────────────────
     RESEND_API_KEY: str = ""
