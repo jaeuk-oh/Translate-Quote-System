@@ -7,11 +7,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, model_config
+from pydantic import BaseModel, ConfigDict
 
 
 class QuoteResponse(BaseModel):
-    model_config = model_config(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     job_id: uuid.UUID

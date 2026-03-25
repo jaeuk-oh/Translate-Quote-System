@@ -8,7 +8,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, model_config
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 # ── 응답 스키마 ──────────────────────────────────────────────────────
 
 class NotificationResponse(BaseModel):
-    model_config = model_config(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     job_id: Optional[UUID] = None

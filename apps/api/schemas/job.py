@@ -6,11 +6,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, model_config
+from pydantic import BaseModel, ConfigDict
 
 
 class JobCreate(BaseModel):
-    model_config = model_config(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     source_lang: str
     target_lang: str
@@ -21,7 +21,7 @@ class JobCreate(BaseModel):
 
 
 class JobResponse(BaseModel):
-    model_config = model_config(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     client_id: uuid.UUID
@@ -45,7 +45,7 @@ class JobStatusUpdate(BaseModel):
 
 
 class JobEventResponse(BaseModel):
-    model_config = model_config(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     job_id: uuid.UUID

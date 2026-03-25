@@ -79,8 +79,9 @@ class JobEvent(Base):
     # 전이 트리거: system | translator | client | admin
     triggered_by: Mapped[Optional[str]] = mapped_column(String(50))
     actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
-    # 추가 컨텍스트 (견적 ID, 배정 ID 등)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB)
+    # 추가 컨텍스트 (견적 ID, 배정 ID 등) — DB 컬럼명은 metadata, Python 속성은 event_data
+    # SQLAlchemy DeclarativeBase가 metadata를 예약 속성으로 사용하므로 속성명을 변경
+    event_data: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

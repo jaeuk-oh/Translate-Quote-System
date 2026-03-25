@@ -107,7 +107,7 @@ async def test_transition_records_event(async_session: AsyncSession):
     assert event.from_status == "REQUESTED"
     assert event.to_status == "QUOTE_PENDING"
     assert event.triggered_by == "system"
-    assert event.metadata == {"reason": "자동 견적 계산 시작"}
+    assert event.event_data == {"reason": "자동 견적 계산 시작"}
 
 
 @pytest.mark.asyncio

@@ -93,7 +93,7 @@ async def transition(
         to_status=to_status,
         triggered_by=triggered_by,
         actor_id=actor_id,
-        metadata=metadata or {},
+        event_data=metadata or {},
     )
     db.add(event)
 

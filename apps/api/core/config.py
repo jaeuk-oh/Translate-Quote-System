@@ -3,8 +3,13 @@
 환경 변수를 pydantic-settings로 로드하여 타입 안전성을 보장.
 """
 
+from pathlib import Path
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+# 프로젝트 루트의 .env 파일 경로 (apps/api/core/ → apps/api/ → apps/ → 프로젝트 루트)
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -41,7 +46,7 @@ class Settings(BaseSettings):
     # ── 앱 설정 ───────────────────────────────────────
     DEBUG: bool = False
 
-    model_config = {"env_file": ".env", "case_sensitive": True}
+    model_config = {"env_file": str(_ENV_FILE), "case_sensitive": True}
 
     @model_validator(mode="after")
     def derive_urls(self) -> "Settings":
