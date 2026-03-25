@@ -59,7 +59,7 @@ app.add_middleware(RateLimitMiddleware)
 # 3. CORS 설정: 개발 환경에서는 모든 오리진 허용, 운영 환경에서는 허용 도메인 명시 권장
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else ["https://yourdomain.com"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

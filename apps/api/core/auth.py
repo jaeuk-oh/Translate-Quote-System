@@ -7,30 +7,27 @@ Access Token (30분) + Refresh Token (7일) 이중 토큰 전략으로 무상태
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from db.session import get_db
-
-# bcrypt 해시 컨텍스트 — 패스워드 저장 시 단방향 해시
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Bearer 토큰 추출기
 bearer_scheme = HTTPBearer()
 
 
 def hash_password(plain: str) -> str:
-    """평문 패스워드를 bcrypt 해시로 변환"""
-    return pwd_context.hash(plain)
+    """평문 패스워드를 bcrypt 해시로 변환 — passlib 버전 충돌 우회를 위해 bcrypt 직접 사용"""
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """입력 패스워드와 저장된 해시를 검증"""
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def _create_token(data: dict, expires_delta: timedelta) -> str:

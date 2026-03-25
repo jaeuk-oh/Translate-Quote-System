@@ -67,13 +67,21 @@
 - Celery Beat으로 배정 만료 체크(24시간 타임아웃)를 별도 cron 없이 관리
 - RabbitMQ 대비 운영 단순성 우선 (Redis를 캐시/락에도 동시 활용)
 
-### 파일 스토리지: AWS S3 (또는 MinIO)
+### 파일 스토리지: Supabase Storage
 
 **선택 이유:**
-- 번역 원본 파일과 결과물을 DB에 저장하면 용량 및 성능 문제 발생
-- S3 presigned URL로 클라이언트가 직접 다운로드 (API 서버 트래픽 절감)
-- 로컬 개발 시 MinIO로 동일한 S3 API 사용 가능 (코드 변경 없음)
-- NDA 관점: 파일은 S3에만 저장되며, TM 분석은 pg_trgm이 DB 내에서 처리 (외부 전송 없음)
+- 이미 DB로 Supabase를 쓰고 있어 추가 인프라 없이 파일 저장 가능
+- AWS S3 대비 환경 변수 3개 감소 (ACCESS_KEY_ID, SECRET_ACCESS_KEY, BUCKET 불필요)
+- NDA 관점: 파일은 Supabase Storage에만 저장되며, TM 분석은 pg_trgm이 DB 내에서 처리 (외부 AI API 전송 없음)
+
+**Supabase를 두 방식으로 연결하는 이유:**
+
+| 연결 방식 | 용도 | 이유 |
+|-----------|------|------|
+| asyncpg 직접 연결 | ORM, FSM 상태 전이 | `SELECT FOR UPDATE` 행 잠금, pg_trgm raw SQL 실행 필요 |
+| supabase-py (REST) | Storage 파일 업로드 | 파일 업로드 API가 REST로 충분 |
+
+supabase-py의 PostgREST는 `SELECT FOR UPDATE`와 `similarity()` raw SQL을 지원하지 않아 DB 접근에는 사용 불가.
 
 ### 인증: JWT + Refresh Token
 
@@ -125,7 +133,7 @@
              ▼
     [재시도 큐 + DLQ]
 
-[S3]  — 번역 파일 원본/결과물
+[Supabase Storage] — 번역 파일 원본/결과물
 [Redis] — Celery 브로커 + 중복 방지 락
 ```
 
@@ -196,26 +204,45 @@ workload_inv = 1 / (1 + current_load)   ← 0 나누기 방지
 
 ## 빠른 시작
 
+> Docker 없이 로컬에서 직접 실행. DB는 Supabase 클라우드 사용.
+
 ### 1. 환경 변수 설정
 
 ```bash
 cp .env.example .env
-# .env 파일을 열어 실제 값 입력
+# .env 파일에 SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_PASSWORD, JWT_SECRET 입력
 ```
 
-### 2. Docker Compose 실행
+### 2. DB 스키마 적용
+
+Supabase 대시보드 → **SQL Editor** 에서 `apps/api/db/schema.sql` 내용을 붙여넣고 실행.
+
+> Alembic 미사용 이유: 포폴 목적 프로젝트에서 마이그레이션 버전 관리보다 단순성 우선.
+> schema.sql을 SQL Editor에서 직접 실행하는 것이 더 간단하고 빠름.
+
+### 3. Redis 설치 및 실행 (로컬)
 
 ```bash
-docker-compose up -d
+brew install redis
+brew services start redis
 ```
 
-### 3. 마이그레이션 실행
+### 4. 가상환경 생성 및 패키지 설치
 
 ```bash
-docker-compose exec api alembic upgrade head
+python3 -m venv apps/api/.venv
+source apps/api/.venv/bin/activate
+pip install -r apps/api/requirements.txt
 ```
 
-### 4. API 문서 확인
+### 5. 서버 실행
+
+```bash
+cd apps/api
+uvicorn main:app --reload
+```
+
+### 6. API 문서 확인
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
@@ -238,7 +265,7 @@ docker-compose exec api alembic upgrade head
 |--------|------|------|
 | POST | `/jobs` | 번역 의뢰 등록 |
 | GET | `/jobs/{id}` | 작업 상세 조회 |
-| POST | `/jobs/{id}/upload` | 파일 업로드 (S3) |
+| POST | `/jobs/{id}/upload` | 파일 업로드 (Supabase Storage) |
 | GET | `/jobs/{id}/events` | FSM 상태 이력 |
 | GET | `/jobs/{id}/stream` | SSE 실시간 상태 스트림 |
 
@@ -264,7 +291,7 @@ docker-compose exec api alembic upgrade head
 
 | Phase | 기간 | 상태 | 핵심 |
 |-------|------|------|------|
-| Phase 1 | 2주 | 완료 | 모노레포 초기화, DB 마이그레이션, FSM, JWT, S3 업로드 |
+| Phase 1 | 2주 | 완료 | 모노레포 초기화, DB 스키마, FSM, JWT, Supabase Storage 업로드 |
 | Phase 2 | 3주 | 예정 | Auto Quote TM 연동, Auto Assign 고도화, Celery 워커 |
 | Phase 3 | 2주 | 예정 | 알림 서비스, Redis SETNX 중복 방지, DLQ + 지수 백오프 |
 | Phase 4 | 2주 | 예정 | SSE 대시보드, 감사 로그, Rate Limit, 통합/부하 테스트 |
