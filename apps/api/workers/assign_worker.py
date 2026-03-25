@@ -1,7 +1,7 @@
 """
 번역가 자동 배정 Celery 워커.
-고객 견적 승인 시 자동으로 최적 번역가 배정.
-번역가 수락/거절 없음 — 배정 즉시 확정.
+고객 견적 승인 시 최적 번역가를 자동 선정하여 배정 레코드 생성.
+담당자가 대시보드에서 배정을 확인하고 확정(IN_PROGRESS)하는 것은 별도 엔드포인트에서 처리.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from db.session import AsyncSessionLocal
 from models.job import Job
-from services import assign_service, state_machine
+from services import assign_service
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -35,9 +35,8 @@ def auto_assign(self, job_id: str, attempt: int = 1):
     처리 흐름:
     1. 후보 번역가 조회 (언어쌍 + 가용 상태 필터)
     2. 점수 계산 → Top 3 중 attempt번째 선택
-    3. 배정 레코드 생성 (즉시 확정, ASSIGNED 상태)
-    4. FSM 전이: ASSIGNED → IN_PROGRESS
-    5. 번역가에게 이메일 통보 (TODO)
+    3. 배정 레코드 생성 (ASSIGNED 상태 유지 — 담당자 확정 대기)
+    ※ IN_PROGRESS 전이는 담당자가 대시보드에서 확정 시 POST /jobs/{id}/assign 에서 처리
 
     attempt: 재배정 시도 횟수 (1 = 최초 배정, 최대 3)
     """
@@ -73,7 +72,7 @@ def auto_assign(self, job_id: str, attempt: int = 1):
                 idx = min(attempt - 1, len(candidates) - 1)
                 translator, score = candidates[idx]
 
-                # 배정 레코드 생성 (즉시 ASSIGNED 상태)
+                # 배정 레코드 생성 — ASSIGNED 상태 유지, 담당자 확정 대기
                 assignment = await assign_service.create_assignment(
                     db=db,
                     job=job,
@@ -81,28 +80,12 @@ def auto_assign(self, job_id: str, attempt: int = 1):
                     score=score,
                 )
 
-                # FSM 전이: ASSIGNED → IN_PROGRESS (배정 즉시 작업 시작)
-                await state_machine.transition(
-                    db=db,
-                    job_id=job.id,
-                    to_status="IN_PROGRESS",
-                    triggered_by="system",
-                    metadata={
-                        "assignment_id": str(assignment.id),
-                        "translator_id": str(translator.id),
-                        "score": str(score),
-                        "attempt": attempt,
-                    },
-                )
-
                 await db.commit()
                 logger.info(
-                    f"자동 배정 완료: job_id={job_id}, "
+                    f"번역가 자동 선정 완료 (담당자 확정 대기): job_id={job_id}, "
                     f"translator_id={translator.id}, "
                     f"score={score}, attempt={attempt}"
                 )
-
-                # TODO: 번역가 이메일 통보
 
             except Exception as exc:
                 await db.rollback()
