@@ -16,6 +16,9 @@ engine = create_async_engine(
     pool_pre_ping=True,    # 연결 유효성 사전 확인 (재연결 자동화)
     pool_size=10,
     max_overflow=20,
+    # Supabase Transaction Pooler(PgBouncer) 호환:
+    # prepared statement 캐시 비활성화 (transaction mode에서 필수)
+    connect_args={"statement_cache_size": 0},
 )
 
 # 세션 팩토리 — 요청마다 새 세션 생성

@@ -27,10 +27,7 @@ class User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    # 관계
-    jobs: Mapped[list["Job"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
-        "Job", back_populates="client", foreign_keys="Job.client_id"
-    )
+    # 관계 — 고객은 더 이상 User 테이블에 없으므로 jobs 관계 제거
     translator_profile: Mapped["Translator"] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Translator", back_populates="user", uselist=False
     )
