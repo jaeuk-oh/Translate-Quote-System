@@ -9,7 +9,6 @@ pydantic-settings==2.2.1
 # ── 데이터베이스 ──────────────────────────
 sqlalchemy[asyncio]==2.0.30
 asyncpg==0.29.0
-alembic==1.13.1
 
 # ── 인증 ─────────────────────────────────
 python-jose[cryptography]==3.3.0
