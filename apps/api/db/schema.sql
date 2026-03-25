@@ -27,9 +27,12 @@ CREATE TABLE users (
 CREATE UNIQUE INDEX ix_users_email ON users (email);
 
 -- ── jobs ─────────────────────────────────────────────────────────
+-- client_id FK 제거: 고객은 회원가입 없이 폼 제출로만 의뢰
+-- client_name, client_email을 job에 직접 저장
 CREATE TABLE jobs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    client_id     UUID NOT NULL REFERENCES users(id),
+    client_name   VARCHAR(100) NOT NULL,
+    client_email  VARCHAR(255) NOT NULL,
     source_lang   VARCHAR(10) NOT NULL,
     target_lang   VARCHAR(10) NOT NULL,
     content_type  VARCHAR(50),   -- marketing | legal | technical | general | medical
@@ -38,11 +41,12 @@ CREATE TABLE jobs (
     word_count    INTEGER,
     status        VARCHAR(30) NOT NULL DEFAULT 'REQUESTED',
     deadline      TIMESTAMPTZ,
+    notes         TEXT,          -- 고객 요청사항 메모
     created_at    TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     updated_at    TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
-CREATE INDEX ix_jobs_status    ON jobs (status);
-CREATE INDEX ix_jobs_client_id ON jobs (client_id);
+CREATE INDEX ix_jobs_status       ON jobs (status);
+CREATE INDEX ix_jobs_client_email ON jobs (client_email);
 CREATE TRIGGER trg_jobs_updated_at
     BEFORE UPDATE ON jobs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -87,6 +91,7 @@ CREATE TABLE translators (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID REFERENCES users(id),
     name          VARCHAR(100),
+    email         VARCHAR(255),             -- 번역가 연락처 (계정 없이 이메일 통보만)
     lang_pairs    TEXT[],   -- ['ko-en', 'ko-ja']
     specialties   TEXT[],   -- ['marketing', 'legal']
     quality_score NUMERIC(4, 3),
@@ -101,26 +106,28 @@ CREATE TABLE translators (
 CREATE INDEX ix_translators_availability ON translators (availability);
 
 -- ── assignments ──────────────────────────────────────────────────
+-- 번역가 수락/거절 없음: 내부 담당자가 직접 배정 확정
+-- status: ASSIGNED(배정됨) | COMPLETED(완료) | CANCELLED(취소)
 CREATE TABLE assignments (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id        UUID NOT NULL REFERENCES jobs(id),
     translator_id UUID NOT NULL REFERENCES translators(id),
     score         NUMERIC(5, 4),
-    status        VARCHAR(20) DEFAULT 'PENDING_ACCEPTANCE',  -- PENDING_ACCEPTANCE | ACCEPTED | REJECTED | EXPIRED
-    assigned_at   TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    accepted_at   TIMESTAMPTZ,
-    rejected_at   TIMESTAMPTZ,
-    expires_at    TIMESTAMPTZ  -- 초과 시 자동 재배정
+    status        VARCHAR(20) DEFAULT 'ASSIGNED',  -- ASSIGNED | COMPLETED | CANCELLED
+    assigned_at   TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 CREATE INDEX ix_assignments_status ON assignments (status);
 CREATE INDEX ix_assignments_job_id ON assignments (job_id);
 
 -- ── notifications ────────────────────────────────────────────────
+-- recipient_id nullable: 외부 고객은 users 테이블에 없으므로 UUID 없음
+-- recipient_email로 실제 발송 대상 식별
 CREATE TABLE notifications (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id       UUID REFERENCES jobs(id),
-    recipient_id UUID NOT NULL,
-    channel      VARCHAR(20),   -- email | slack | webhook
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id          UUID REFERENCES jobs(id),
+    recipient_id    UUID,          -- 내부 사용자(관리자/번역가)만 해당, 외부 고객은 NULL
+    recipient_email VARCHAR(255),  -- 실제 발송 이메일 주소
+    channel         VARCHAR(20),   -- email | slack | webhook
     payload      JSONB,
     status       VARCHAR(20) DEFAULT 'PENDING',  -- PENDING | SENT | FAILED | DEAD_LETTER
     attempts     INTEGER DEFAULT 0,
@@ -130,6 +137,7 @@ CREATE TABLE notifications (
 );
 CREATE INDEX ix_notifications_status       ON notifications (status);
 CREATE INDEX ix_notifications_recipient_id ON notifications (recipient_id);
+CREATE INDEX ix_notifications_recipient_email ON notifications (recipient_email);
 
 -- ── tm_segments (Translation Memory) ────────────────────────────
 CREATE TABLE tm_segments (

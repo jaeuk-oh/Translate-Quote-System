@@ -20,7 +20,7 @@ from core.rate_limit import limiter
 from core.storage import upload_translation_file
 from db.session import get_db
 from models.job import Job
-from schemas.job import JobCreate, JobEventResponse, JobResponse
+from schemas.job import JobCreate, JobEventResponse, JobResponse, JobStatusUpdate
 from services import state_machine
 from services.sse_service import build_completed_event, build_status_event
 from workers.quote_worker import calculate_quote
@@ -40,22 +40,22 @@ REDIS_CHANNEL_TEMPLATE = "channel:job:{job_id}"
 async def create_job(
     request: Request,
     body: JobCreate,
-    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    번역 의뢰 등록.
+    번역 의뢰 등록 — 인증 불필요, 고객이 폼으로 직접 제출.
     즉시 job_id 반환 후 비동기로 견적 계산 (Celery 큐 등록).
-    대용량 파일도 API 응답 블로킹 없이 처리.
     """
     job = Job(
-        client_id=UUID(current_user["user_id"]),
+        client_name=body.client_name,
+        client_email=body.client_email,
         source_lang=body.source_lang,
         target_lang=body.target_lang,
         content_type=body.content_type,
         quality_level=body.quality_level,
         word_count=body.word_count,
         deadline=body.deadline,
+        notes=body.notes,
         status="REQUESTED",
     )
     db.add(job)
@@ -76,7 +76,7 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    번역 파일 업로드 (S3).
+    번역 파일 업로드 (S3) — 내부 담당자 전용.
     업로드 완료 후 자동으로 견적 계산 큐 등록.
     허용 포맷: docx, doc, pdf, txt, xlsx, pptx, xliff
     """
@@ -84,9 +84,6 @@ async def upload_file(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-
-    if str(job.client_id) != current_user["user_id"]:
-        raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
 
     file_url = await upload_translation_file(file, str(job_id))
     job.file_url = file_url
@@ -105,15 +102,10 @@ async def list_jobs(
     status_filter: Optional[str] = None,
 ):
     """
-    내 번역 작업 목록 조회.
+    번역 작업 목록 조회 — 내부 담당자 전용.
     status_filter 파라미터로 특정 상태만 필터링 가능.
-    클라이언트: 자신의 작업만 조회 / 관리자: 전체 조회
     """
     stmt = select(Job)
-
-    # 관리자가 아니면 본인 작업만 조회
-    if current_user["role"] != "admin":
-        stmt = stmt.where(Job.client_id == UUID(current_user["user_id"]))
 
     # 상태 필터링 (선택적)
     if status_filter:

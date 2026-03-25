@@ -1,6 +1,12 @@
 """
 배정(Assignment) 라우터.
-추천 번역가 조회, 배정 확정, 수락/거절 엔드포인트 제공.
+
+엔드포인트 (모두 관리자 전용):
+  GET  /jobs/{job_id}/assign/recommend — 추천 번역가 목록 조회
+  POST /jobs/{job_id}/assign           — 번역가 배정 확정 (번역가에게 이메일 통보)
+  GET  /jobs/{job_id}/assignments      — 배정 이력 조회
+
+번역가 수락/거절 제거: 내부 담당자가 직접 배정 확정하고 번역가는 이메일 통보만 받음.
 """
 
 from uuid import UUID
@@ -15,13 +21,11 @@ from models.assignment import Assignment
 from models.job import Job
 from models.translator import Translator
 from schemas.assignment import (
-    AssignmentActionRequest,
     AssignmentResponse,
     AssignRequest,
     TranslatorCandidateResponse,
 )
 from services import assign_service, state_machine
-from workers.assign_worker import auto_reassign
 
 router = APIRouter(prefix="/jobs", tags=["배정"])
 
@@ -66,12 +70,19 @@ async def assign_translator(
 ):
     """
     배정 확정 (관리자 전용).
-    추천 목록에서 선택한 번역가로 배정 레코드 생성.
+    번역가 수락/거절 없음 — 배정 즉시 확정되고 번역가에게 이메일 통보.
+    FSM 전이: ASSIGNED → IN_PROGRESS (배정 확정 후 바로 진행 중으로 전환)
     """
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    if job.status != "ASSIGNED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"번역가 배정은 ASSIGNED 상태에서만 가능합니다. 현재: {job.status}",
+        )
 
     t_result = await db.execute(
         select(Translator).where(Translator.id == body.translator_id)
@@ -85,15 +96,17 @@ async def assign_translator(
         db=db, job=job, translator=translator, score=score
     )
 
-    # FSM 전이: QUOTED → PENDING_ACCEPTANCE
+    # FSM 전이: ASSIGNED → IN_PROGRESS (담당자가 배정 확정 = 작업 즉시 시작)
     await state_machine.transition(
         db=db,
         job_id=job.id,
-        to_status="PENDING_ACCEPTANCE",
+        to_status="IN_PROGRESS",
         triggered_by="admin",
         actor_id=UUID(current_user["user_id"]),
-        metadata={"assignment_id": str(assignment.id)},
+        metadata={"assignment_id": str(assignment.id), "translator_id": str(translator.id)},
     )
+
+    # TODO: 번역가 이메일 통보 (notification_service 연동)
 
     return assignment
 
@@ -104,68 +117,9 @@ async def list_assignments(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """배정 이력 조회"""
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     return job.assignments
-
-
-@router.post("/assignments/{assignment_id}/respond", response_model=AssignmentResponse)
-async def respond_to_assignment(
-    assignment_id: UUID,
-    body: AssignmentActionRequest,
-    current_user: dict = Depends(require_role("translator")),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    번역가의 수락/거절 응답.
-    수락 시: FSM 전이 PENDING_ACCEPTANCE → ASSIGNED.
-    거절 시: 배정 REJECTED + Celery 재배정 큐 등록.
-    """
-    result = await db.execute(
-        select(Assignment).where(Assignment.id == assignment_id)
-    )
-    assignment = result.scalar_one_or_none()
-    if assignment is None:
-        raise HTTPException(status_code=404, detail="배정 건을 찾을 수 없습니다.")
-
-    if assignment.status != "PENDING_ACCEPTANCE":
-        raise HTTPException(
-            status_code=400,
-            detail=f"수락/거절은 PENDING_ACCEPTANCE 상태에서만 가능합니다. 현재: {assignment.status}",
-        )
-
-    if body.is_accept():
-        # 수락 처리
-        assignment = await assign_service.accept_assignment(db=db, assignment=assignment)
-
-        # FSM 전이: PENDING_ACCEPTANCE → ASSIGNED
-        await state_machine.transition(
-            db=db,
-            job_id=assignment.job_id,
-            to_status="ASSIGNED",
-            triggered_by="translator",
-            actor_id=UUID(current_user["user_id"]),
-            metadata={"assignment_id": str(assignment_id)},
-        )
-        return assignment
-    else:
-        # 거절 처리
-        assignment = await assign_service.reject_assignment(db=db, assignment=assignment)
-
-        # 현재 재배정 시도 횟수 파악 후 다음 순위로 재배정
-        past_result = await db.execute(
-            select(Assignment).where(
-                Assignment.job_id == assignment.job_id,
-            )
-        )
-        all_assignments = past_result.scalars().all()
-        # 거절/만료 횟수 + 1 = 다음 시도 번호
-        next_attempt = sum(
-            1 for a in all_assignments if a.status in {"REJECTED", "EXPIRED"}
-        ) + 1
-
-        # 재배정 태스크 큐 등록 (즉시)
-        auto_reassign.delay(str(assignment.job_id), next_attempt)
-        return assignment

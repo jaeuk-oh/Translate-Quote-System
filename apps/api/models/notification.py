@@ -24,7 +24,10 @@ class Notification(Base):
     job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("jobs.id")
     )
-    recipient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # 내부 사용자(관리자)만 해당, 외부 고객은 None
+    recipient_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 실제 발송 이메일 주소 (외부 고객 포함 모든 수신자)
+    recipient_email: Mapped[Optional[str]] = mapped_column(String(255))
     # 발송 채널: email | slack | webhook
     channel: Mapped[Optional[str]] = mapped_column(String(20))
     # 알림 내용 (제목, 본문, 링크 등)

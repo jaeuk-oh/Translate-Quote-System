@@ -6,12 +6,12 @@ Redis SETNX로 중복 발송 방지: lock:notify:{job_id}:{event} EX 10
 발송 성공/실패 결과를 notifications 테이블에 기록 (attempts 카운트 포함).
 
 이벤트별 발송 매핑:
-  QUOTED              → 클라이언트  → 이메일
-  PENDING_ACCEPTANCE  → 번역가     → 이메일
-  ASSIGNED            → 번역가     → 이메일 + Slack
-  COMPLETED           → 클라이언트 → 이메일 + Webhook
-  QA_FAILED           → 번역가     → 이메일
-  REASSIGNED          → 관리자     → Slack
+  QUOTED_DRAFT → 관리자     → 이메일 (내부 담당자에게 견적 검토 요청)
+  QUOTED       → 클라이언트 → 이메일 (고객에게 견적 발송, 승인/거절 링크 포함)
+  ASSIGNED     → 번역가     → 이메일 (배정 통보)
+  COMPLETED    → 클라이언트 → 이메일 + Webhook
+  QA_FAILED    → 번역가     → 이메일
+  REASSIGNED   → 관리자     → Slack
 """
 
 import logging
@@ -50,12 +50,14 @@ def _get_redis() -> aioredis.Redis:
 # ── 이벤트별 발송 채널 매핑 ─────────────────────────────────────────
 # 수신자 역할과 채널 목록으로 구성
 EVENT_CHANNEL_MAP: dict[str, dict[str, Any]] = {
-    "QUOTED": {
-        "recipient_role": "client",
+    "QUOTED_DRAFT": {
+        # 자동 견적 완료 → 내부 담당자에게 검토 요청 이메일
+        "recipient_role": "admin",
         "channels": ["email"],
     },
-    "PENDING_ACCEPTANCE": {
-        "recipient_role": "translator",
+    "QUOTED": {
+        # 담당자 검토 완료 → 고객에게 견적 발송
+        "recipient_role": "client",
         "channels": ["email"],
     },
     "ASSIGNED": {
@@ -285,7 +287,8 @@ async def send_notification_for_event(
         # Notification 레코드 생성 (PENDING 상태로 시작)
         notification = Notification(
             job_id=job.id,
-            recipient_id=recipient_id,
+            recipient_id=recipient_id,      # 외부 클라이언트/번역가는 None
+            recipient_email=recipient_email,
             channel=channel,
             payload=payload,
             status="PENDING",
@@ -325,11 +328,11 @@ async def get_recipient_info(
     이벤트 유형에 따라 수신자 ID와 이메일 조회.
 
     이벤트별 수신자 역할:
-    - client 역할: job.client_id로 사용자 조회
-    - translator 역할: 가장 최근 ACCEPTED 배정의 번역가 사용자 조회
-    - admin 역할: role='admin'인 첫 번째 사용자 조회 (Slack은 ID 불필요)
+    - client 역할: job.client_email 직접 사용 (users 테이블 조회 없음)
+    - translator 역할: 배정된 Translator 레코드의 email 직접 사용 (계정 없음)
+    - admin 역할: role='admin'인 첫 번째 사용자 조회
 
-    반환: (recipient_id, recipient_email) 튜플, 없으면 None
+    반환: (recipient_id, recipient_email) 튜플, recipient_id는 외부 수신자의 경우 None
     """
     event_config = EVENT_CHANNEL_MAP.get(event)
     if not event_config:
@@ -338,34 +341,29 @@ async def get_recipient_info(
     recipient_role = event_config["recipient_role"]
 
     if recipient_role == "client":
-        result = await db.execute(
-            select(User).where(User.id == job.client_id)
-        )
-        user = result.scalar_one_or_none()
-        if user:
-            return user.id, user.email
+        # 고객은 users 테이블에 없음 — job에 직접 저장된 이메일 사용
+        return (None, job.client_email)
 
     elif recipient_role == "translator":
-        # 가장 최근 수락된 배정의 번역가 정보 조회
+        # 번역가는 계정 없음 — 배정된 translator 레코드의 email 직접 사용
         from models.assignment import Assignment
         from models.translator import Translator
         from sqlalchemy import and_
         result = await db.execute(
-            select(User)
-            .join(Translator, Translator.user_id == User.id)
+            select(Translator)
             .join(Assignment, Assignment.translator_id == Translator.id)
             .where(
                 and_(
                     Assignment.job_id == job.id,
-                    Assignment.status == "ACCEPTED",
+                    Assignment.status == "ASSIGNED",
                 )
             )
-            .order_by(Assignment.accepted_at.desc())
+            .order_by(Assignment.assigned_at.desc())
             .limit(1)
         )
-        user = result.scalar_one_or_none()
-        if user:
-            return user.id, user.email
+        translator = result.scalar_one_or_none()
+        if translator and translator.email:
+            return (translator.id, translator.email)
 
     elif recipient_role == "admin":
         # 관리자 계정 조회 (Slack 전용 이벤트이므로 이메일은 플레이스홀더)

@@ -2,6 +2,8 @@
 번역 작업(Job) 및 FSM 이벤트 이력(JobEvent) 모델.
 상태 전이는 반드시 state_machine.py를 통해서만 수행되며,
 모든 전이는 job_events 테이블에 원자적으로 기록된다.
+
+고객은 회원가입 없이 폼 제출로만 의뢰 — client_name/client_email을 job에 직접 저장.
 """
 
 import uuid
@@ -21,9 +23,9 @@ class Job(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
+    # 고객 정보: FK 없이 직접 저장 (로그인 불필요)
+    client_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    client_email: Mapped[str] = mapped_column(String(255), nullable=False)
     source_lang: Mapped[str] = mapped_column(String(10), nullable=False)
     target_lang: Mapped[str] = mapped_column(String(10), nullable=False)
     content_type: Mapped[Optional[str]] = mapped_column(String(50))  # marketing | legal | technical | general
@@ -33,6 +35,7 @@ class Job(Base):
     # FSM 현재 상태 — state_machine.py가 단독 관리
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="REQUESTED")
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[Optional[str]] = mapped_column(Text)  # 고객 요청사항 메모
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -43,9 +46,6 @@ class Job(Base):
     )
 
     # 관계
-    client: Mapped["User"] = relationship(  # type: ignore[name-defined]  # noqa: F821
-        "User", back_populates="jobs", foreign_keys=[client_id]
-    )
     quotes: Mapped[list["Quote"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Quote", back_populates="job"
     )

@@ -6,25 +6,30 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class JobCreate(BaseModel):
+    """고객 폼 제출 스키마 — 인증 불필요, 이름/이메일 직접 입력"""
     model_config = ConfigDict(str_strip_whitespace=True)
 
+    client_name: str
+    client_email: EmailStr
     source_lang: str
     target_lang: str
     content_type: Optional[str] = None
     quality_level: Optional[str] = None
     word_count: Optional[int] = None
     deadline: Optional[datetime] = None
+    notes: Optional[str] = None  # 고객 요청사항 메모
 
 
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    client_id: uuid.UUID
+    client_name: str
+    client_email: str
     source_lang: str
     target_lang: str
     content_type: Optional[str] = None
@@ -33,6 +38,7 @@ class JobResponse(BaseModel):
     word_count: Optional[int] = None
     status: str
     deadline: Optional[datetime] = None
+    notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -53,5 +59,5 @@ class JobEventResponse(BaseModel):
     to_status: str
     triggered_by: Optional[str] = None
     actor_id: Optional[uuid.UUID] = None
-    metadata: Optional[dict] = None
+    event_data: Optional[dict] = None
     created_at: datetime

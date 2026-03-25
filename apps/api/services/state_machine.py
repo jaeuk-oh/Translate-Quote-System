@@ -15,19 +15,25 @@ from models.job import Job, JobEvent
 
 # ── FSM 전이 테이블 ─────────────────────────────────────────────
 # 허용된 전이만 등록. 리스트 = 같은 from_status에서 여러 to_status 가능.
-# (예: QA는 통과 시 COMPLETED, 실패 시 IN_PROGRESS로 분기)
+#
+# 플로우:
+#   REQUESTED → QUOTE_PENDING (Celery 견적 계산 시작)
+#   QUOTE_PENDING → QUOTED_DRAFT (자동 견적 완료, 내부 담당자 검토 대기)
+#   QUOTED_DRAFT → QUOTED (내부 담당자 승인 후 고객에게 발송)
+#   QUOTED → ASSIGNED (고객 이메일 링크 승인 → 번역가 배정 완료)
+#   ASSIGNED → IN_PROGRESS → REVIEW → QA → COMPLETED
 VALID_TRANSITIONS: dict[str, list[str]] = {
-    "REQUESTED": ["QUOTE_PENDING"],
-    "QUOTE_PENDING": ["QUOTED"],
-    "QUOTED": ["PENDING_ACCEPTANCE"],
-    "PENDING_ACCEPTANCE": ["ASSIGNED"],
-    "ASSIGNED": ["IN_PROGRESS"],
-    "IN_PROGRESS": ["REVIEW"],
-    "REVIEW": ["QA"],
+    "REQUESTED":    ["QUOTE_PENDING"],
+    "QUOTE_PENDING": ["QUOTED_DRAFT"],          # 자동 견적 완료
+    "QUOTED_DRAFT": ["QUOTED"],                  # 내부 담당자 검토 → 고객 발송
+    "QUOTED":       ["ASSIGNED"],                # 고객 승인 → 배정 (PENDING_ACCEPTANCE 제거)
+    "ASSIGNED":     ["IN_PROGRESS"],
+    "IN_PROGRESS":  ["REVIEW"],
+    "REVIEW":       ["QA"],
     # QA 분기: 통과 → COMPLETED, 실패 → IN_PROGRESS (최대 3회, 워커에서 제한)
-    "QA": ["COMPLETED", "IN_PROGRESS"],
+    "QA":           ["COMPLETED", "IN_PROGRESS"],
     # 어느 상태에서든 취소 가능
-    "CANCELLED": [],
+    "CANCELLED":    [],
 }
 
 

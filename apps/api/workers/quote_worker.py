@@ -75,11 +75,11 @@ def calculate_quote(self: Task, job_id: str, tm_match_rate: float = 0.0):
                     tm_match_rate=tm_match_rate,
                 )
 
-                # FSM 전이: QUOTE_PENDING → QUOTED (견적 완료, 클라이언트 승인 대기)
+                # FSM 전이: QUOTE_PENDING → QUOTED_DRAFT (견적 완료, 내부 담당자 검토 대기)
                 await state_machine.transition(
                     db=db,
                     job_id=job.id,
-                    to_status="QUOTED",
+                    to_status="QUOTED_DRAFT",
                     triggered_by="system",
                     metadata={"quote_id": str(quote.id)},
                 )

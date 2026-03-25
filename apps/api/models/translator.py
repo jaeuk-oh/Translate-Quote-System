@@ -26,6 +26,8 @@ class Translator(Base):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     name: Mapped[Optional[str]] = mapped_column(String(100))
+    # 번역가 연락처 — 계정 없이 이메일 통보만 수신
+    email: Mapped[Optional[str]] = mapped_column(String(255))
     # 언어쌍 배열: ['ko-en', 'ko-ja'] — 배정 후보 필터링에 사용
     lang_pairs: Mapped[Optional[list]] = mapped_column(ARRAY(String))
     # 전문분야 배열: ['marketing', 'legal'] — 전문성 매칭에 사용
