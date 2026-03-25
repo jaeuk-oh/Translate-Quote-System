@@ -1,36 +1,25 @@
 /**
- * API 클라이언트.
+ * 관리자 전용 API 클라이언트.
  * Authorization Bearer 헤더를 자동으로 첨부하는 fetchWithAuth 래퍼와
  * 도메인별 API 함수 모음.
- *
- * BASE_URL은 환경 변수 NEXT_PUBLIC_API_URL에서 로드.
- * 미설정 시 로컬 개발 서버(http://localhost:8000) 사용.
  */
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 // ── 타입 정의 ──────────────────────────────────────────────────────
 
-export interface JobCreatePayload {
-  source_lang: string
-  target_lang: string
-  content_type?: string
-  quality_level?: string
-  word_count?: number
-  deadline?: string
-}
-
 export interface JobResponse {
   id: string
-  client_id: string
+  client_name: string
+  client_email: string
   source_lang: string
   target_lang: string
   content_type: string | null
   quality_level: string | null
-  file_url: string | null
   word_count: number | null
   status: string
   deadline: string | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
@@ -50,13 +39,32 @@ export interface QuoteResponse {
   created_at: string
 }
 
-// ── fetchWithAuth: Authorization Bearer 헤더 자동 첨부 ─────────────
+export interface TranslatorCandidate {
+  translator_id: string
+  name: string | null
+  score: number
+  quality_score: number | null
+  on_time_rate: number | null
+  availability: string
+  current_load: number
+  max_load: number
+}
 
-async function fetchWithAuth(
+export interface AssignmentResponse {
+  id: string
+  job_id: string
+  translator_id: string
+  score: number | null
+  status: string
+  assigned_at: string
+}
+
+// ── fetchWithAuth ─────────────────────────────────────────────────
+
+export async function fetchWithAuth(
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  // 클라이언트 사이드에서만 localStorage 접근 가능
   const token =
     typeof window !== 'undefined'
       ? localStorage.getItem('access_token')
@@ -65,76 +73,69 @@ async function fetchWithAuth(
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(options.headers ?? {}),
-    // 토큰이 있을 때만 Authorization 헤더 추가
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  })
+  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers })
 
-  // 4xx / 5xx 응답을 에러로 변환
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    const message = body?.detail ?? `API 오류: ${response.status}`
-    throw new Error(message)
+    throw new Error(body?.detail ?? `API 오류: ${response.status}`)
   }
 
   return response
 }
 
-// ── 작업(Job) API ──────────────────────────────────────────────────
+// ── 작업(Job) API ─────────────────────────────────────────────────
 
-/**
- * 번역 의뢰 생성.
- * 생성 완료 후 Celery 워커가 자동으로 견적 계산을 시작함.
- */
-export async function createJob(data: JobCreatePayload): Promise<JobResponse> {
-  const response = await fetchWithAuth('/jobs', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-  return response.json()
+export async function listJobs(): Promise<JobResponse[]> {
+  const res = await fetchWithAuth('/jobs')
+  return res.json()
 }
 
-/**
- * 작업 상세 조회.
- */
 export async function getJob(id: string): Promise<JobResponse> {
-  const response = await fetchWithAuth(`/jobs/${id}`)
-  return response.json()
+  const res = await fetchWithAuth(`/jobs/${id}`)
+  return res.json()
 }
 
-// ── 견적(Quote) API ────────────────────────────────────────────────
+// ── 견적(Quote) API ───────────────────────────────────────────────
 
-/**
- * 특정 작업의 견적 조회.
- * Celery 워커가 견적 계산을 완료한 후 조회 가능 (status=COMPLETED).
- */
 export async function getQuote(jobId: string): Promise<QuoteResponse> {
-  const response = await fetchWithAuth(`/quotes/${jobId}`)
-  return response.json()
+  const res = await fetchWithAuth(`/jobs/${jobId}/quote`)
+  return res.json()
 }
 
-/**
- * 견적 승인.
- * 승인 시 FSM: QUOTED → PENDING_ACCEPTANCE 전이 트리거.
- */
-export async function approveQuote(quoteId: string): Promise<QuoteResponse> {
-  const response = await fetchWithAuth(`/quotes/${quoteId}/approve`, {
-    method: 'POST',
-  })
-  return response.json()
+/** 담당자가 견적 검토 완료 후 고객에게 발송 (QUOTED_DRAFT → QUOTED) */
+export async function sendQuoteToClient(
+  jobId: string
+): Promise<{ message: string; approval_url: string; rejection_url: string }> {
+  const res = await fetchWithAuth(`/jobs/${jobId}/quote/send`, { method: 'POST' })
+  return res.json()
 }
 
-/**
- * 견적 거절.
- * 거절 시 FSM: QUOTED → CANCELLED 전이 트리거.
- */
-export async function rejectQuote(quoteId: string): Promise<QuoteResponse> {
-  const response = await fetchWithAuth(`/quotes/${quoteId}/reject`, {
+// ── 배정(Assignment) API ──────────────────────────────────────────
+
+/** 추천 번역가 목록 조회 (점수 내림차순 Top 3) */
+export async function getRecommendedTranslators(
+  jobId: string
+): Promise<TranslatorCandidate[]> {
+  const res = await fetchWithAuth(`/jobs/${jobId}/assign/recommend`)
+  return res.json()
+}
+
+/** 담당자가 번역가 배정 확정 (ASSIGNED → IN_PROGRESS) */
+export async function assignTranslator(
+  jobId: string,
+  translatorId: string
+): Promise<AssignmentResponse> {
+  const res = await fetchWithAuth(`/jobs/${jobId}/assign`, {
     method: 'POST',
+    body: JSON.stringify({ translator_id: translatorId }),
   })
-  return response.json()
+  return res.json()
+}
+
+export async function listAssignments(jobId: string): Promise<AssignmentResponse[]> {
+  const res = await fetchWithAuth(`/jobs/${jobId}/assignments`)
+  return res.json()
 }
