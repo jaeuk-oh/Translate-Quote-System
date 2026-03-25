@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from db.session import AsyncSessionLocal
 from models.job import Job
-from services import assign_service
+from services import assign_service, notification_service
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -52,13 +52,20 @@ def auto_assign(self, job_id: str, attempt: int = 1):
                     logger.error(f"배정 실패: job_id={job_id} 를 찾을 수 없음")
                     return
 
-                # 최대 재배정 횟수 초과 → 관리자 에스컬레이션
+                # 최대 재배정 횟수 초과 → 관리자 Slack 에스컬레이션
                 if attempt > assign_service.MAX_REASSIGN_ATTEMPTS:
                     logger.warning(
                         f"최대 재배정 횟수({assign_service.MAX_REASSIGN_ATTEMPTS}) 초과: "
-                        f"job_id={job_id} — 관리자 알림 전송 필요"
+                        f"job_id={job_id} — 관리자 알림 전송"
                     )
-                    # TODO: 관리자 Slack/이메일 알림 전송
+                    recipient = await notification_service.get_recipient_info(db, job, "REASSIGNED")
+                    if recipient:
+                        recipient_id, recipient_email = recipient
+                        await notification_service.send_notification_for_event(
+                            db=db, job=job, event="REASSIGNED",
+                            recipient_id=recipient_id, recipient_email=recipient_email,
+                        )
+                        await db.commit()
                     return
 
                 # 후보 번역가 조회 (상위 3명)

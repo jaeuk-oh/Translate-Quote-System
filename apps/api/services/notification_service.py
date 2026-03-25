@@ -79,13 +79,31 @@ EVENT_CHANNEL_MAP: dict[str, dict[str, Any]] = {
 }
 
 
-def build_email_payload(event: str, job: Job, recipient_email: str) -> dict[str, Any]:
+def build_email_payload(
+    event: str,
+    job: Job,
+    recipient_email: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     이벤트 유형과 작업 정보로 Resend API 이메일 페이로드 생성.
-    수신자 이메일, 제목, 본문(HTML)을 포함한 딕셔너리 반환.
+    extra: 템플릿에 추가로 주입할 데이터 (예: QUOTED 이벤트의 approval_url, rejection_url)
     """
+    extra = extra or {}
     # 이벤트별 제목 및 본문 템플릿
     templates: dict[str, dict[str, str]] = {
+        "QUOTED_DRAFT": {
+            "subject": f"[번역 플랫폼] 견적 검토 요청 - 작업 #{str(job.id)[:8]}",
+            "body": f"""
+                <h2>견적 검토가 필요합니다</h2>
+                <p>자동 견적 계산이 완료되었습니다. 대시보드에서 확인 후 고객에게 발송해주세요.</p>
+                <ul>
+                    <li>언어쌍: {job.source_lang} → {job.target_lang}</li>
+                    <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
+                    <li>단어 수: {job.word_count or '미산정'}</li>
+                </ul>
+            """,
+        },
         "QUOTED": {
             "subject": f"[번역 플랫폼] 견적이 완료되었습니다 - 작업 #{str(job.id)[:8]}",
             "body": f"""
@@ -96,28 +114,21 @@ def build_email_payload(event: str, job: Job, recipient_email: str) -> dict[str,
                     <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
                     <li>단어 수: {job.word_count or '미산정'}</li>
                 </ul>
-                <p>플랫폼에 접속하여 견적을 확인하고 승인해주세요.</p>
-            """,
-        },
-        "PENDING_ACCEPTANCE": {
-            "subject": f"[번역 플랫폼] 새 번역 작업 배정 요청 - 작업 #{str(job.id)[:8]}",
-            "body": f"""
-                <h2>새 번역 작업 배정 요청</h2>
-                <p>귀하에게 번역 작업이 배정되었습니다. 24시간 이내에 수락 여부를 결정해주세요.</p>
-                <ul>
-                    <li>언어쌍: {job.source_lang} → {job.target_lang}</li>
-                    <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
-                    <li>마감일: {job.deadline.strftime('%Y-%m-%d') if job.deadline else '미지정'}</li>
-                </ul>
+                <p>
+                    <a href="{extra.get('approval_url', '#')}">✅ 견적 승인</a>
+                    &nbsp;&nbsp;|&nbsp;&nbsp;
+                    <a href="{extra.get('rejection_url', '#')}">❌ 견적 거절</a>
+                </p>
             """,
         },
         "ASSIGNED": {
             "subject": f"[번역 플랫폼] 작업 배정 확정 - 작업 #{str(job.id)[:8]}",
             "body": f"""
-                <h2>작업 배정이 확정되었습니다</h2>
-                <p>번역 작업을 수락해주셔서 감사합니다. 작업을 시작해주세요.</p>
+                <h2>작업이 배정되었습니다</h2>
+                <p>번역 작업이 배정되었습니다. 아래 내용을 확인하고 작업을 시작해주세요.</p>
                 <ul>
                     <li>언어쌍: {job.source_lang} → {job.target_lang}</li>
+                    <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
                     <li>마감일: {job.deadline.strftime('%Y-%m-%d') if job.deadline else '미지정'}</li>
                 </ul>
             """,
@@ -246,8 +257,9 @@ async def send_notification_for_event(
     db: AsyncSession,
     job: Job,
     event: str,
-    recipient_id: UUID,
+    recipient_id: UUID | None,
     recipient_email: str,
+    extra: dict[str, Any] | None = None,
 ) -> list[Notification]:
     """
     FSM 이벤트에 대응하는 알림 레코드를 생성하고 발송.
@@ -278,7 +290,7 @@ async def send_notification_for_event(
     for channel in channels:
         # 채널별 페이로드 생성
         if channel == "email":
-            payload = build_email_payload(event, job, recipient_email)
+            payload = build_email_payload(event, job, recipient_email, extra=extra)
         elif channel in ("slack", "webhook"):
             payload = build_slack_payload(event, job)
         else:

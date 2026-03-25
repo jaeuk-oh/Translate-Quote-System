@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from db.session import AsyncSessionLocal
 from models.job import Job
-from services import quote_service, state_machine
+from services import notification_service, quote_service, state_machine
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,19 @@ def calculate_quote(self: Task, job_id: str, tm_match_rate: float = 0.0):
                     f"견적 계산 완료: job_id={job_id}, "
                     f"price={quote.estimated_price}, quote_id={quote.id}"
                 )
+
+                # 담당자에게 견적 검토 요청 이메일 발송
+                recipient = await notification_service.get_recipient_info(db, job, "QUOTED_DRAFT")
+                if recipient:
+                    recipient_id, recipient_email = recipient
+                    await notification_service.send_notification_for_event(
+                        db=db,
+                        job=job,
+                        event="QUOTED_DRAFT",
+                        recipient_id=recipient_id,
+                        recipient_email=recipient_email,
+                    )
+                    await db.commit()
 
             except Exception as exc:
                 await db.rollback()

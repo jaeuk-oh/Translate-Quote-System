@@ -25,7 +25,7 @@ from schemas.assignment import (
     AssignRequest,
     TranslatorCandidateResponse,
 )
-from services import assign_service, state_machine
+from services import assign_service, notification_service, state_machine
 
 router = APIRouter(prefix="/jobs", tags=["배정"])
 
@@ -106,7 +106,18 @@ async def assign_translator(
         metadata={"assignment_id": str(assignment.id), "translator_id": str(translator.id)},
     )
 
-    # TODO: 번역가 이메일 통보 (notification_service 연동)
+    # 번역가에게 배정 확정 이메일 발송
+    recipient = await notification_service.get_recipient_info(db, job, "ASSIGNED")
+    if recipient:
+        recipient_id, recipient_email = recipient
+        await notification_service.send_notification_for_event(
+            db=db,
+            job=job,
+            event="ASSIGNED",
+            recipient_id=recipient_id,
+            recipient_email=recipient_email,
+        )
+    await db.commit()
 
     return assignment
 

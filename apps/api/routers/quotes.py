@@ -23,7 +23,7 @@ from db.session import get_db
 from models.job import Job
 from models.quote import Quote
 from schemas.quote import QuoteResponse
-from services import state_machine
+from services import notification_service, state_machine
 from workers.assign_worker import auto_assign
 
 router = APIRouter(tags=["견적"])
@@ -103,8 +103,17 @@ async def send_quote_to_client(
     approval_url = f"http://localhost:8000/quotes/approve?token={token}&action=approve"
     rejection_url = f"http://localhost:8000/quotes/approve?token={token}&action=reject"
 
-    # TODO: 실제 이메일 발송 (notification_service 연동)
-    # 현재는 토큰 URL 반환으로 대체 (개발/테스트용)
+    # 고객에게 견적 이메일 발송 (승인/거절 링크 포함)
+    await notification_service.send_notification_for_event(
+        db=db,
+        job=job,
+        event="QUOTED",
+        recipient_id=None,
+        recipient_email=job.client_email,
+        extra={"approval_url": approval_url, "rejection_url": rejection_url},
+    )
+    await db.commit()
+
     return {
         "message": f"{job.client_email}에 견적서를 발송했습니다.",
         "approval_url": approval_url,
