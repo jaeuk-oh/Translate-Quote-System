@@ -504,16 +504,43 @@ cp .env.example .env
 # .env 파일을 열어 실제 값 입력
 ```
 
-### Docker Compose 실행
+**Supabase DB 연결 주의사항**
 
-```bash
-docker-compose up -d
+Supabase free tier는 direct connection(`db.{ref}.supabase.co:5432`)이 IPv4를 지원하지 않는다. IPv4는 유료 플랜 전용이다.
+
+따라서 free tier에서는 **Transaction Pooler URL**을 `DATABASE_URL`에 직접 입력해야 한다:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres.{ref}:{password}@{pooler-host}:6543/postgres
 ```
 
-### 마이그레이션 실행
+pooler host와 전체 connection string은 Supabase 대시보드 → **Settings → Database → Connection string → URI** 탭에서 확인. `postgresql://` 앞부분을 `postgresql+asyncpg://`로 바꿔서 사용한다.
+
+### DB 초기화 (Supabase)
+
+Supabase 대시보드 → SQL Editor에서 `apps/api/db/schema.sql` 실행.
+
+### 백엔드 실행
 
 ```bash
-docker-compose exec api alembic upgrade head
+cd apps/api
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### Celery 워커 실행
+
+```bash
+cd apps/api
+celery -A workers.celery_app worker --loglevel=info
+```
+
+### 프론트엔드 실행
+
+```bash
+cd apps/web
+npm install
+npm run dev
 ```
 
 ### API 문서 확인
@@ -527,7 +554,7 @@ docker-compose exec api alembic upgrade head
 
 | Phase | 기간 | 상태 | 핵심 |
 |-------|------|------|------|
-| Phase 1 | 2주 | 완료 | 모노레포 초기화, DB 마이그레이션, FSM, JWT, S3 업로드 |
-| Phase 2 | 3주 | 진행 중 | Auto Quote TM 연동, Auto Assign 고도화, Celery 워커 |
-| Phase 3 | 2주 | 예정 | 알림 서비스, Redis SETNX 중복 방지, DLQ + 지수 백오프 |
-| Phase 4 | 2주 | 예정 | SSE 대시보드, 감사 로그, Rate Limit, 통합/부하 테스트 |
+| Phase 1 | 2주 | 완료 | 모노레포 초기화, DB 스키마, FSM, JWT, S3 업로드 |
+| Phase 2 | 3주 | 완료 | Auto Quote + TM 매칭, Auto Assign, Celery 워커 |
+| Phase 3 | 2주 | 완료 | 알림 서비스, Redis SETNX 중복 방지, DLQ + 지수 백오프 |
+| Phase 4 | 2주 | 진행 중 | SSE 대시보드, 감사 로그, Rate Limit, 통합 테스트 |
