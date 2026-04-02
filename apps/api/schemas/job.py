@@ -35,6 +35,7 @@ class JobResponse(BaseModel):
     content_type: Optional[str] = None
     quality_level: Optional[str] = None
     file_url: Optional[str] = None
+    result_file_url: Optional[str] = None
     word_count: Optional[int] = None
     status: str
     deadline: Optional[datetime] = None

@@ -37,7 +37,8 @@ CREATE TABLE jobs (
     target_lang   VARCHAR(10) NOT NULL,
     content_type  VARCHAR(50),   -- marketing | legal | technical | general | medical
     quality_level VARCHAR(20),   -- translation | review | dtp
-    file_url      TEXT,
+    file_url            TEXT,           -- 원본 파일 URL (관리자 업로드)
+    result_file_url     TEXT,           -- 번역 완료 파일 URL (번역가 제출)
     word_count    INTEGER,
     status        VARCHAR(30) NOT NULL DEFAULT 'REQUESTED',
     deadline      TIMESTAMPTZ,

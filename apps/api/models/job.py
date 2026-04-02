@@ -30,7 +30,8 @@ class Job(Base):
     target_lang: Mapped[str] = mapped_column(String(10), nullable=False)
     content_type: Mapped[Optional[str]] = mapped_column(String(50))  # marketing | legal | technical | general
     quality_level: Mapped[Optional[str]] = mapped_column(String(20))  # translation | review | dtp
-    file_url: Mapped[Optional[str]] = mapped_column(Text)
+    file_url: Mapped[Optional[str]] = mapped_column(Text)       # 원본 파일 URL
+    result_file_url: Mapped[Optional[str]] = mapped_column(Text)  # 번역가 제출 완료 파일 URL
     word_count: Mapped[Optional[int]] = mapped_column(Integer)
     # FSM 현재 상태 — state_machine.py가 단독 관리
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="REQUESTED")

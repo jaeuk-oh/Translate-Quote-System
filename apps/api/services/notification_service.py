@@ -76,6 +76,11 @@ EVENT_CHANNEL_MAP: dict[str, dict[str, Any]] = {
         "recipient_role": "admin",
         "channels": ["slack"],
     },
+    # 번역가 결과물 제출 → 관리자에게 검토 요청
+    "SUBMITTED": {
+        "recipient_role": "admin",
+        "channels": ["email"],
+    },
 }
 
 
@@ -131,6 +136,21 @@ def build_email_payload(
                     <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
                     <li>마감일: {job.deadline.strftime('%Y-%m-%d') if job.deadline else '미지정'}</li>
                 </ul>
+                <p>작업 완료 후 아래 링크에서 결과물을 제출해주세요:</p>
+                <p><a href="{extra.get('submit_url', '#')}">📤 완료 파일 제출하기</a></p>
+            """,
+        },
+        "SUBMITTED": {
+            "subject": f"[번역 플랫폼] 결과물 제출 완료 - 검토 필요 - 작업 #{str(job.id)[:8]}",
+            "body": f"""
+                <h2>번역가가 결과물을 제출했습니다</h2>
+                <p>아래 작업의 번역이 완료되어 검토가 필요합니다.</p>
+                <ul>
+                    <li>언어쌍: {job.source_lang} → {job.target_lang}</li>
+                    <li>콘텐츠 유형: {job.content_type or '미지정'}</li>
+                    <li>마감일: {job.deadline.strftime('%Y-%m-%d') if job.deadline else '미지정'}</li>
+                </ul>
+                <p><a href="{extra.get('dashboard_url', '#')}">대시보드에서 검토하기 →</a></p>
             """,
         },
         "COMPLETED": {

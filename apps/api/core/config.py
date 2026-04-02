@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     # ── 앱 설정 ───────────────────────────────────────
     DEBUG: bool = False
+    FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = {"env_file": str(_ENV_FILE), "case_sensitive": True}
 

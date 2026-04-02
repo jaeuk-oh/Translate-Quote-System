@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import get_current_user, require_role
+from core.auth import get_current_user, require_role, create_translator_submit_token
+from core.config import settings
 from db.session import get_db
 from models.assignment import Assignment
 from models.job import Job
@@ -106,16 +107,20 @@ async def assign_translator(
         metadata={"assignment_id": str(assignment.id), "translator_id": str(translator.id)},
     )
 
-    # 번역가에게 배정 확정 이메일 발송
+    # 번역가에게 배정 확정 이메일 발송 (완료 파일 제출 링크 포함)
     recipient = await notification_service.get_recipient_info(db, job, "ASSIGNED")
     if recipient:
         recipient_id, recipient_email = recipient
+        # 번역가 제출용 토큰 생성 — 이메일 링크에 포함
+        submit_token = create_translator_submit_token(str(job.id), str(translator.id))
+        submit_url = f"{settings.FRONTEND_URL}/submit/{job.id}?token={submit_token}"
         await notification_service.send_notification_for_event(
             db=db,
             job=job,
             event="ASSIGNED",
             recipient_id=recipient_id,
             recipient_email=recipient_email,
+            extra={"submit_url": submit_url},
         )
     await db.commit()
 

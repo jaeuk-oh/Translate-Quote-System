@@ -149,6 +149,49 @@ def decode_quote_approval_token(token: str) -> str:
     return job_id
 
 
+def create_translator_submit_token(job_id: str, translator_id: str) -> str:
+    """
+    번역가 결과물 제출용 토큰 생성 (14일 유효).
+    배정 확정 이메일 링크에 포함되어 로그인 없이 파일 제출에 사용.
+    페이로드: job_id, translator_id, type=translator_submit
+    """
+    return _create_token(
+        data={"job_id": job_id, "translator_id": translator_id, "type": "translator_submit"},
+        expires_delta=timedelta(days=14),
+    )
+
+
+def decode_translator_submit_token(token: str) -> dict:
+    """
+    번역가 제출 토큰 검증 후 job_id, translator_id 반환.
+    타입 불일치 또는 만료 시 HTTPException 400 발생.
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효하지 않거나 만료된 제출 링크입니다.",
+        )
+
+    if payload.get("type") != "translator_submit":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="잘못된 토큰 타입입니다.",
+        )
+
+    job_id = payload.get("job_id")
+    translator_id = payload.get("translator_id")
+    if not job_id or not translator_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="토큰에서 작업 정보를 찾을 수 없습니다.",
+        )
+    return {"job_id": job_id, "translator_id": translator_id}
+
+
 def require_role(*roles: str):
     """
     특정 역할을 가진 사용자만 접근을 허용하는 의존성 팩토리.

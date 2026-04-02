@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import get_current_user
+from core.auth import get_current_user, decode_translator_submit_token
 from core.config import settings
 from core.rate_limit import limiter
 from core.storage import upload_translation_file
@@ -143,6 +143,75 @@ async def get_job_events(
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     return job.events
+
+
+@router.post("/{job_id}/complete", response_model=JobResponse)
+@limiter.limit("10/minute")
+async def submit_completed_file(
+    request: Request,
+    job_id: UUID,
+    token: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    번역 완료 파일 제출 — 번역가 전용 (토큰 인증).
+    배정 확정 이메일의 링크에 포함된 토큰으로 인증하며 로그인 불필요.
+
+    처리 흐름:
+    1. 제출 토큰 검증 (job_id 일치 여부 포함)
+    2. 결과 파일을 Supabase Storage에 업로드 (file_type=result)
+    3. FSM 전이: IN_PROGRESS → REVIEW
+    4. 관리자에게 검토 요청 알림 발송
+    """
+    from services import notification_service
+
+    # 토큰 검증 — job_id 불일치 시 400
+    token_data = decode_translator_submit_token(token)
+    if token_data["job_id"] != str(job_id):
+        raise HTTPException(status_code=400, detail="토큰의 작업 정보가 일치하지 않습니다.")
+
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    if job.status != "IN_PROGRESS":
+        raise HTTPException(
+            status_code=400,
+            detail=f"완료 파일 제출은 IN_PROGRESS 상태에서만 가능합니다. 현재: {job.status}",
+        )
+
+    # 완료 파일 업로드 (file_type=result로 원본과 경로 분리)
+    result_url = await upload_translation_file(file, str(job_id), file_type="result")
+    job.result_file_url = result_url
+
+    # FSM 전이: IN_PROGRESS → REVIEW
+    await state_machine.transition(
+        db=db,
+        job_id=job.id,
+        to_status="REVIEW",
+        triggered_by="translator",
+        metadata={"translator_id": token_data["translator_id"], "result_file_url": result_url},
+    )
+
+    # 관리자에게 검토 요청 알림 (대시보드 링크 포함)
+    recipient = await notification_service.get_recipient_info(db, job, "SUBMITTED")
+    if recipient:
+        recipient_id, recipient_email = recipient
+        dashboard_url = f"{settings.FRONTEND_URL}/jobs/{job_id}"
+        await notification_service.send_notification_for_event(
+            db=db,
+            job=job,
+            event="SUBMITTED",
+            recipient_id=recipient_id,
+            recipient_email=recipient_email,
+            extra={"dashboard_url": dashboard_url},
+        )
+
+    await db.commit()
+    await db.refresh(job)
+    return job
 
 
 @router.get("/{job_id}/stream")
