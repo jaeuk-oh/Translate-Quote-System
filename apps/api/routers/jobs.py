@@ -145,6 +145,34 @@ async def get_job_events(
     return job.events
 
 
+@router.patch("/{job_id}/status", response_model=JobResponse)
+async def update_job_status(
+    job_id: UUID,
+    body: JobStatusUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    관리자용 수동 상태 전이 엔드포인트.
+    REVIEW → QA, QA → COMPLETED, QA → IN_PROGRESS(재작업) 등에 사용.
+    FSM 유효성 검증은 state_machine.transition()에서 수행.
+    """
+    from uuid import UUID as UUIDType
+    actor_id = UUIDType(current_user["user_id"])
+
+    job = await state_machine.transition(
+        db=db,
+        job_id=job_id,
+        to_status=body.to_status,
+        triggered_by=body.triggered_by,
+        actor_id=actor_id,
+        metadata=body.metadata,
+    )
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
 @router.post("/{job_id}/complete", response_model=JobResponse)
 @limiter.limit("10/minute")
 async def submit_completed_file(

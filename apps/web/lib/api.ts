@@ -20,6 +20,8 @@ export interface JobResponse {
   status: string
   deadline: string | null
   notes: string | null
+  file_url: string | null
+  result_file_url: string | null
   created_at: string
   updated_at: string
 }
@@ -137,5 +139,20 @@ export async function assignTranslator(
 
 export async function listAssignments(jobId: string): Promise<AssignmentResponse[]> {
   const res = await fetchWithAuth(`/jobs/${jobId}/assignments`)
+  return res.json()
+}
+
+// ── 상태 전이 API ──────────────────────────────────────────────────
+
+/** 관리자가 job 상태를 수동으로 전이 (REVIEW→QA, QA→COMPLETED, QA→IN_PROGRESS 등) */
+export async function advanceStatus(
+  jobId: string,
+  toStatus: string,
+  metadata?: Record<string, string>
+): Promise<JobResponse> {
+  const res = await fetchWithAuth(`/jobs/${jobId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ to_status: toStatus, triggered_by: 'admin', metadata }),
+  })
   return res.json()
 }

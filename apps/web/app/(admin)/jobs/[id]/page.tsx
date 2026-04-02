@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   getJob, getQuote, sendQuoteToClient,
-  getRecommendedTranslators, assignTranslator,
+  getRecommendedTranslators, assignTranslator, advanceStatus,
   JobResponse, QuoteResponse, TranslatorCandidate,
 } from '@/lib/api'
 
@@ -210,6 +210,93 @@ function AssignPanel({ jobId, onDone }: { jobId: string; onDone: () => void }) {
   )
 }
 
+// ── 검토 패널 (REVIEW 상태) ──────────────────────────────────────
+function ReviewPanel({ jobId, job, onDone }: { jobId: string; job: JobResponse; onDone: () => void }) {
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleAdvance = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      await advanceStatus(jobId, 'QA')
+      setTimeout(onDone, 500)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '오류 발생')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-5 space-y-4">
+      <span className="text-cyan-700 font-semibold text-sm">● 검토 필요</span>
+      <p className="text-sm text-gray-600">번역가가 완료 파일을 제출했습니다. 내용을 검토한 후 QA로 넘기세요.</p>
+      {job.result_file_url && (
+        <a
+          href={job.result_file_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+        >
+          완료 파일 다운로드 →
+        </a>
+      )}
+      {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <button
+        onClick={handleAdvance}
+        disabled={isLoading}
+        className="w-full py-2.5 bg-cyan-600 text-white text-sm font-semibold rounded-lg hover:bg-cyan-700 disabled:opacity-50 transition-colors"
+      >
+        {isLoading ? '처리 중...' : 'QA로 이관'}
+      </button>
+    </div>
+  )
+}
+
+// ── QA 패널 (QA 상태) ────────────────────────────────────────────
+function QAPanel({ jobId, onDone }: { jobId: string; onDone: () => void }) {
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handle = async (toStatus: 'COMPLETED' | 'IN_PROGRESS') => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      await advanceStatus(jobId, toStatus)
+      setTimeout(onDone, 500)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '오류 발생')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-teal-50 border border-teal-200 rounded-xl p-5 space-y-4">
+      <span className="text-teal-700 font-semibold text-sm">● QA 검수</span>
+      <p className="text-sm text-gray-600">QA 검수 결과를 선택하세요.</p>
+      {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <div className="flex gap-3">
+        <button
+          onClick={() => handle('COMPLETED')}
+          disabled={isLoading}
+          className="flex-1 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+        >
+          통과 → 완료
+        </button>
+        <button
+          onClick={() => handle('IN_PROGRESS')}
+          disabled={isLoading}
+          className="flex-1 py-2.5 bg-red-500 text-white text-sm font-semibold rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
+        >
+          반려 → 재작업
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── 메인 페이지 ───────────────────────────────────────────────────
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -272,6 +359,12 @@ export default function JobDetailPage() {
       )}
       {job.status === 'ASSIGNED' && (
         <AssignPanel jobId={id} onDone={load} />
+      )}
+      {job.status === 'REVIEW' && (
+        <ReviewPanel jobId={id} job={job} onDone={load} />
+      )}
+      {job.status === 'QA' && (
+        <QAPanel jobId={id} onDone={load} />
       )}
 
       {/* 견적 정보 (QUOTED 이후) */}
