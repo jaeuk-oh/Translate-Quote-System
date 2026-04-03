@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
-    model_config = {"env_file": str(_ENV_FILE), "case_sensitive": True}
+    model_config = {"env_file": str(_ENV_FILE), "case_sensitive": True, "extra": "ignore"}
 
     @model_validator(mode="after")
     def derive_celery_urls(self) -> "Settings":
