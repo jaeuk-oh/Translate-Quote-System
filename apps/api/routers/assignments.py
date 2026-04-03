@@ -1,12 +1,14 @@
 """
 배정(Assignment) 라우터.
 
-엔드포인트 (모두 관리자 전용):
-  GET  /jobs/{job_id}/assign/recommend — 추천 번역가 목록 조회
-  POST /jobs/{job_id}/assign           — 번역가 배정 확정 (번역가에게 이메일 통보)
-  GET  /jobs/{job_id}/assignments      — 배정 이력 조회
+엔드포인트:
+  GET  /jobs/{job_id}/assign/recommend                          — 추천 번역가 목록 조회 (관리자)
+  POST /jobs/{job_id}/assign                                    — 번역가 배정 (관리자)
+  GET  /jobs/{job_id}/assignments                               — 배정 이력 조회
+  POST /jobs/{job_id}/assignments/{assignment_id}/accept        — 번역가 수락 (FSM → IN_PROGRESS)
+  POST /jobs/{job_id}/assignments/{assignment_id}/reject        — 번역가 거절 (부하 복원)
 
-번역가 수락/거절 제거: 내부 담당자가 직접 배정 확정하고 번역가는 이메일 통보만 받음.
+흐름: 관리자가 배정 → 번역가가 수락/거절 → 수락 시 FSM 전이 + 제출 링크 이메일 발송.
 """
 
 from uuid import UUID
@@ -96,32 +98,6 @@ async def assign_translator(
     assignment = await assign_service.create_assignment(
         db=db, job=job, translator=translator, score=score
     )
-
-    # FSM 전이: ASSIGNED → IN_PROGRESS (담당자가 배정 확정 = 작업 즉시 시작)
-    await state_machine.transition(
-        db=db,
-        job_id=job.id,
-        to_status="IN_PROGRESS",
-        triggered_by="admin",
-        actor_id=UUID(current_user["user_id"]),
-        metadata={"assignment_id": str(assignment.id), "translator_id": str(translator.id)},
-    )
-
-    # 번역가에게 배정 확정 이메일 발송 (완료 파일 제출 링크 포함)
-    recipient = await notification_service.get_recipient_info(db, job, "ASSIGNED")
-    if recipient:
-        recipient_id, recipient_email = recipient
-        # 번역가 제출용 토큰 생성 — 이메일 링크에 포함
-        submit_token = create_translator_submit_token(str(job.id), str(translator.id))
-        submit_url = f"{settings.FRONTEND_URL}/submit/{job.id}?token={submit_token}"
-        await notification_service.send_notification_for_event(
-            db=db,
-            job=job,
-            event="ASSIGNED",
-            recipient_id=recipient_id,
-            recipient_email=recipient_email,
-            extra={"submit_url": submit_url},
-        )
     await db.commit()
 
     return assignment
@@ -139,3 +115,114 @@ async def list_assignments(
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     return job.assignments
+
+
+@router.post("/{job_id}/assignments/{assignment_id}/accept", response_model=AssignmentResponse)
+async def accept_assignment(
+    job_id: UUID,
+    assignment_id: UUID,
+    current_user: dict = Depends(require_role("translator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    번역가 일감 수락.
+    Assignment PENDING_ACCEPTANCE → ACCEPTED, FSM ASSIGNED → IN_PROGRESS.
+    수락 완료 후 번역가에게 완료 파일 제출 링크 이메일 발송.
+    """
+    result = await db.execute(
+        select(Assignment).where(
+            Assignment.id == assignment_id,
+            Assignment.job_id == job_id,
+            Assignment.translator_id == UUID(current_user["user_id"]),
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="배정 정보를 찾을 수 없습니다.")
+
+    if assignment.status != "PENDING_ACCEPTANCE":
+        raise HTTPException(status_code=400, detail=f"수락 가능한 상태가 아닙니다. 현재: {assignment.status}")
+
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    # 배정 수락 처리
+    assignment.status = "ACCEPTED"
+    from datetime import datetime, timezone as tz
+    assignment.accepted_at = datetime.now(tz.utc)
+
+    # FSM 전이: ASSIGNED → IN_PROGRESS
+    await state_machine.transition(
+        db=db,
+        job_id=job.id,
+        to_status="IN_PROGRESS",
+        triggered_by="translator",
+        metadata={"assignment_id": str(assignment.id)},
+    )
+
+    # 번역가에게 제출 링크 이메일 발송
+    translator_result = await db.execute(
+        select(Translator).where(Translator.id == assignment.translator_id)
+    )
+    translator = translator_result.scalar_one_or_none()
+    if translator and translator.email:
+        submit_token = create_translator_submit_token(str(job.id), str(translator.id))
+        submit_url = f"{settings.FRONTEND_URL}/submit/{job.id}?token={submit_token}"
+        await notification_service.send_notification_for_event(
+            db=db,
+            job=job,
+            event="ASSIGNED",
+            recipient_id=translator.id,
+            recipient_email=translator.email,
+            extra={"submit_url": submit_url},
+        )
+
+    await db.commit()
+    return assignment
+
+
+@router.post("/{job_id}/assignments/{assignment_id}/reject", response_model=AssignmentResponse)
+async def reject_assignment(
+    job_id: UUID,
+    assignment_id: UUID,
+    current_user: dict = Depends(require_role("translator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    번역가 일감 거절.
+    Assignment PENDING_ACCEPTANCE → REJECTED.
+    번역가 부하 복원 후 관리자에게 재배정 필요 알림.
+    """
+    result = await db.execute(
+        select(Assignment).where(
+            Assignment.id == assignment_id,
+            Assignment.job_id == job_id,
+            Assignment.translator_id == UUID(current_user["user_id"]),
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="배정 정보를 찾을 수 없습니다.")
+
+    if assignment.status != "PENDING_ACCEPTANCE":
+        raise HTTPException(status_code=400, detail=f"거절 가능한 상태가 아닙니다. 현재: {assignment.status}")
+
+    # 배정 거절 처리
+    assignment.status = "REJECTED"
+    from datetime import datetime, timezone as tz
+    assignment.rejected_at = datetime.now(tz.utc)
+
+    # 번역가 부하 복원
+    translator_result = await db.execute(
+        select(Translator).where(Translator.id == assignment.translator_id)
+    )
+    translator = translator_result.scalar_one_or_none()
+    if translator and translator.current_load > 0:
+        translator.current_load -= 1
+        from services.assign_service import _update_translator_availability
+        _update_translator_availability(translator)
+
+    await db.commit()
+    return assignment

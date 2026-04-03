@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from core.audit_log import AuditLogMiddleware
 from core.config import settings
 from core.rate_limit import RateLimitMiddleware, limiter
-from routers import auth, jobs, quotes, assignments, notifications
+from routers import auth, jobs, quotes, assignments, notifications, translator
 
 
 @asynccontextmanager
@@ -71,6 +71,7 @@ app.include_router(jobs.router)
 app.include_router(quotes.router)
 app.include_router(assignments.router)
 app.include_router(notifications.router)
+app.include_router(translator.router)
 
 
 @app.get("/health", tags=["헬스체크"])

@@ -53,3 +53,10 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class TranslatorLoginRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str
+    email: EmailStr
