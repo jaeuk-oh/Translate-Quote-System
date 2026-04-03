@@ -28,17 +28,17 @@ const ROLES = [
     iconColor: 'text-indigo-500',
   },
   {
-    href: null,
+    href: '/translator/login',
     label: '번역가',
-    desc: '배정 이메일의 링크로 접속하세요',
+    desc: '배정된 작업을 확인하고 제출합니다',
     icon: (
       <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
       </svg>
     ),
-    color: 'border-gray-200 cursor-default opacity-70',
-    iconColor: 'text-gray-400',
+    color: 'hover:border-green-400 hover:bg-green-50',
+    iconColor: 'text-green-500',
   },
 ]
 
