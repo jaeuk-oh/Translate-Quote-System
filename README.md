@@ -503,6 +503,114 @@ npm run dev
 
 ---
 
+## 트러블슈팅 기록
+
+개발 중 마주친 실제 에러와 해결 과정.
+
+---
+
+### 1. `SUPABASE_DB_PASSWORD` Extra Field 에러
+
+**원인**
+Pydantic Settings는 기본적으로 `.env`에 정의되지 않은 변수가 있으면 에러를 낸다. `.env`에는 `SUPABASE_DB_PASSWORD`가 있었는데 `config.py` 모델에는 선언이 없었다.
+
+**해결**
+`config.py`에 `extra: "ignore"` 추가. 모델에 없는 env 변수를 무시하도록 설정.
+
+**선택 이유**
+모든 env 변수를 모델에 선언할 필요 없이 필요한 것만 정의하면 되는 구조가 유지보수에 유리하다. 값을 강제로 모델에 넣으면 불필요한 필드가 늘어난다.
+
+---
+
+### 2. `result_file_url` 컬럼 없음
+
+**원인**
+Python SQLAlchemy 모델에는 `result_file_url` 컬럼이 정의되어 있었지만, Supabase 실제 테이블에는 해당 컬럼이 없었다.
+
+**해결**
+Supabase SQL Editor에서 `ALTER TABLE jobs ADD COLUMN result_file_url TEXT` 실행.
+
+**선택 이유**
+SQLAlchemy 모델은 DB 구조를 Python에 알려주는 선언일 뿐이고, 실제 DB 테이블은 별도로 수정해야 한다. 코드와 DB를 동기화하는 유일한 방법은 DDL SQL 실행이다.
+
+---
+
+### 3. `text[] @> varchar[]` 타입 불일치
+
+**원인**
+`lang_pairs` 컬럼이 DB에 `varchar[]`로 저장되어 있는데, SQLAlchemy 쿼리에서 `text[]`로 비교하니 PostgreSQL이 타입 불일치 에러를 냈다.
+
+**해결**
+코드는 기존 방식 유지. DB 컬럼을 `varchar[]` → `text[]`로 변경하는 SQL 실행.
+
+```sql
+ALTER TABLE translators ALTER COLUMN lang_pairs TYPE text[] USING lang_pairs::text[];
+```
+
+**선택 이유**
+코드 방식을 바꾸면 `cast()` 로직이 추가되어 쿼리가 복잡해진다. DB 컬럼 타입을 맞추는 것이 근본적인 해결이고 코드가 단순하게 유지된다.
+
+---
+
+### 4. AuthGuard 무한 리다이렉트
+
+**원인**
+`/auth/login` 페이지가 `(admin)` 라우트 그룹 안에 있어서 `AdminLayout`(AuthGuard 포함)이 적용됐다. 토큰 없음 → 로그인 페이지로 리다이렉트 → 로그인 페이지도 AuthGuard 적용 → 다시 리다이렉트 → 무한 루프.
+
+**해결**
+로그인 페이지를 `(admin)` 그룹 밖인 `(public)` 그룹으로 이동.
+
+**선택 이유**
+예외 경로 목록을 코드에 하드코딩하는 대신, 구조적으로 AuthGuard 레이아웃 범위 밖으로 빼면 추후 경로가 늘어나도 예외 관리가 필요 없다.
+
+---
+
+### 5. 관리자 헤더가 로그인 페이지에 노출
+
+**원인**
+`/auth/login`이 `(admin)` 그룹 안에 있어서 `AdminLayout`의 `AdminHeader`가 로그인 페이지에도 렌더링됐다.
+
+**해결**
+`(public)` 그룹으로 이동. `(public)` 레이아웃에는 AdminHeader가 없다.
+
+**선택 이유**
+Next.js App Router는 폴더 구조로 레이아웃 적용 범위를 결정한다. 그룹 밖으로 이동하면 해당 레이아웃이 자동으로 적용되지 않는다.
+
+---
+
+### 6. `(admin)` / `(translator)` 라우트 충돌
+
+**원인**
+두 라우트 그룹 모두 `/dashboard` 경로를 가졌다. Next.js 라우트 그룹은 URL에 영향을 주지 않아서 `/dashboard`가 중복으로 존재하게 됐다.
+
+**해결**
+`(translator)` 그룹 제거 → `translator/` 일반 폴더로 이동. URL이 `/translator/dashboard`로 분리됨.
+
+**선택 이유**
+라우트 그룹`()`은 레이아웃 분리 목적이고 URL 자체를 바꾸지 않는다. 경로를 실제로 분리하려면 일반 폴더를 사용해야 한다.
+
+---
+
+### 7. `expires_at` Invalid Keyword Argument
+
+**원인**
+`assign_service.py`의 `create_assignment`가 `Assignment(expires_at=expires_at, ...)` 으로 인스턴스를 생성했는데, `Assignment` SQLAlchemy 모델에 `expires_at` 컬럼이 없었다. 응답 스키마(`AssignmentResponse`)에는 선언되어 있었지만 DB 매핑 모델에는 빠진 불일치 상태였다.
+
+**해결**
+`models/assignment.py`에 `accepted_at`, `rejected_at`, `expires_at` 컬럼 추가. Supabase 테이블에도 동일하게 컬럼 추가.
+
+```sql
+ALTER TABLE assignments
+  ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+```
+
+**선택 이유**
+SQLAlchemy는 모델에 선언된 컬럼만 키워드 인자로 받는다. 스키마(응답 형식)와 모델(DB 매핑)은 역할이 달라서 별도로 관리되는데, 둘 다 동기화해야 정상 동작한다.
+
+---
+
 ## 개발 로드맵
 
 | Phase | 상태 | 핵심 |
